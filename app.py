@@ -227,15 +227,23 @@ with tab2:
         with st.spinner("자막 및 주요 장면 타임스탬프를 처리 중입니다..."):
           try:
             # 안전한 자막 호출 로직 (버전 호환)
+            # 1. 자막 추출 (YouTubeTranscriptApi 인스턴스 또는 fetch_transcript 활용)
             try:
+              # 인스턴스 생성 후 fetch
               ytt = YouTubeTranscriptApi()
-              fetched = ytt.fetch(v_id, languages=["ko", "en", "en-US"])
-              transcript_list = fetched.data
-            except Exception:
-              # 대체 경로 시도
-              transcript_list = YouTubeTranscriptApi.get_transcript(
-                  v_id, languages=["ko", "en", "en-US"]
-              )
+              fetched_transcript = ytt.fetch(v_id, languages=['ko', 'en', 'en-US', 'auto'])
+              transcript_list = fetched_transcript.data
+            except AttributeError:
+              # 구버전/메서드 직접 호출 예외 처리
+              try:
+                transcript_list = YouTubeTranscriptApi.get_transcript(
+                    v_id, languages=['ko', 'en', 'en-US', 'auto']
+                )
+              except Exception:
+                # list_transcripts 방식 최후 시도
+                transcript_obj = YouTubeTranscriptApi.list_transcripts(v_id)
+                transcript = transcript_obj.find_transcript(['ko', 'en', 'en-US'])
+                transcript_list = transcript.fetch()
 
             full_text = " ".join([
                 item["text"] if isinstance(item, dict) else item.text
