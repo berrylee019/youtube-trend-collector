@@ -226,25 +226,34 @@ with tab2:
       else:
         with st.spinner("자막 및 주요 장면 타임스탬프를 처리 중입니다..."):
           try:
-            # 안전한 자막 호출 로직 (버전 호환)
-            # 1. 자막 추출 (YouTubeTranscriptApi 인스턴스 또는 fetch_transcript 활용)
-            try:
-              # 인스턴스 생성 후 fetch
-              ytt = YouTubeTranscriptApi()
-              fetched_transcript = ytt.fetch(v_id, languages=['ko', 'en', 'en-US', 'auto'])
-              transcript_list = fetched_transcript.data
-            except AttributeError:
-              # 구버전/메서드 직접 호출 예외 처리
-              try:
-                transcript_list = YouTubeTranscriptApi.get_transcript(
-                    v_id, languages=['ko', 'en', 'en-US', 'auto']
-                )
-              except Exception:
-                # list_transcripts 방식 최후 시도
-                transcript_obj = YouTubeTranscriptApi.list_transcripts(v_id)
-                transcript = transcript_obj.find_transcript(['ko', 'en', 'en-US'])
-                transcript_list = transcript.fetch()
+            # =========================================================
+            # [수정 위치] 1. 프록시(Proxy) 주소 설정 (Streamlit Cloud IP 차단 우회)
+            # =========================================================
+            # 공용 프록시 서버 등록 (필요시 다른 동작하는 무료/유료 프록시 IP로 교체 가능)
+            proxies = {
+                "http": "http://103.152.112.162:80",
+                "https": "http://103.152.112.162:80",
+            }
 
+            # =========================================================
+            # [수정 위치] 2. 자막 요청 시 proxies 파라미터 전달
+            # =========================================================
+            try:
+              # 최신 인스턴스 형태 호출 시 proxies 전달
+              ytt = YouTubeTranscriptApi()
+              fetched = ytt.fetch(
+                  v_id, languages=["ko", "en", "en-US"], proxies=proxies
+              )
+              transcript_list = fetched.data
+            except Exception:
+              # 구버전/대체 함수 호출 시 proxies 전달
+              transcript_list = YouTubeTranscriptApi.get_transcript(
+                  v_id, languages=["ko", "en", "en-US"], proxies=proxies
+              )
+
+            # ---------------------------------------------------------
+            # 이하 기존 자막 텍스트 결합 및 타임스탬프 추출 로직 (동일)
+            # ---------------------------------------------------------
             full_text = " ".join([
                 item["text"] if isinstance(item, dict) else item.text
                 for item in transcript_list
@@ -255,7 +264,7 @@ with tab2:
                 else transcript_list[-1].start
             )
 
-            # 2. 주요 장면 타임스탬프 산출
+            # 주요 장면 타임스탬프 산출
             interval = (
                 total_duration / num_captures if total_duration > 0 else 0
             )
@@ -285,7 +294,7 @@ with tab2:
                 )
                 st.markdown(f"[▶️ 해당 장면 보기]({ts_link})")
 
-            # 3. ChatGPT / Claude 프롬프트 자동 구성
+            # ChatGPT / Claude 프롬프트 자동 구성
             timestamps_text = "\n".join(timestamps)
             ai_prompt = f"""아래는 외국인이 한국을 여행하며 남긴 영상 스크립트와 주요 장면 캡처 타임스탬프 정보야.
 한국 시청자가 흥미를 느낄 수 있도록 '외국인의 시선과 본국의 문화 차이'를 비교 분석하는 제3자 나레이션 대본을 작성해줘.
@@ -311,6 +320,6 @@ with tab2:
 
           except Exception as e:
             st.error(
-                "자막을 불러올 수 없습니다. 원본 영상에 자막(CC)이 없거나"
-                f" 차단되었을 수 있습니다: {e}"
+                "자막을 불러올 수 없습니다. 프록시 서버 연결 실패 또는 원본"
+                f" 영상에 자막이 없을 수 있습니다: {e}"
             )
