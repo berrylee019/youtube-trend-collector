@@ -230,76 +230,41 @@ with tab2:
       if not v_id:
         st.error("유효한 유튜브 영상 URL이 아닙니다.")
       else:
-        with st.spinner("자막 데이터를 추출 중입니다..."):
+        with st.spinner("Supadata API로 자막을 추출 중입니다..."):
           try:
+            supadata_key = st.secrets.get("SUPADATA_API_KEY", "")
             full_text = ""
             total_duration = 0
 
-            # 1. 외부 오픈 인스턴스를 활용한 자막 텍스트 수집 (IP 차단 완전 회피)
-            invidious_instances = [
-                f"https://api.invidious.io/instances/1/youtube/v3/videos/{v_id}",
-                f"https://yt.artemislena.eu/api/v1/captions/{v_id}",
-            ]
-
-            # 1차 시도: Supadata / Timedtext 오픈 엔드포인트
-            caption_url = f"https://ws.streamable.com/me/caption?v={v_id}"
-            res = requests.get(
-                f"https://yt-caption-extractor.vercel.app/api/captions?videoId={v_id}",
-                timeout=10,
-            )
-
-            if res.status_code == 200:
-              try:
-                res_data = res.json()
-                if isinstance(res_data, list):
-                  full_text = " ".join([
-                      item.get("text", "")
-                      for item in res_data
-                      if isinstance(item, dict)
-                  ])
-                  if res_data and isinstance(res_data[-1], dict):
-                    total_duration = float(res_data[-1].get("start", 0))
-              except Exception:
-                pass
-
-            # 2차 시도: 1차 실패 시 대체 캡처 서브파이프라인 (유튜브 timedtext 직접 파싱)
-            if not full_text:
-              timedtext_url = f"https://www.youtube.com/api/timedtext?v={v_id}&lang=en&fmt=json3"
-              # CORS Anywhere 우회 요청
-              proxy_url = (
-                  f"https://corsproxy.io/?{requests.utils.quote(timedtext_url)}"
-              )
-              res2 = requests.get(proxy_url, timeout=10)
-
-              if res2.status_code == 200:
-                try:
-                  data2 = res2.json()
-                  events = data2.get("events", [])
-                  text_parts = []
-                  for event in events:
-                    segs = event.get("segs", [])
-                    for seg in segs:
-                      utf8_text = seg.get("utf8", "").strip()
-                      if utf8_text and utf8_text != "\n":
-                        text_parts.append(utf8_text)
-
-                  full_text = " ".join(text_parts)
-                  if events and "tStartMs" in events[-1]:
-                    total_duration = float(events[-1]["tStartMs"]) / 1000.0
-                except Exception:
-                  pass
-
-            # ---------------------------------------------------------
-            # 자막 추출 결과 검증 및 UI 출력
-            # ---------------------------------------------------------
-            if not full_text:
-              st.error(
-                  "자막을 불러올 수 없거나, 원본 영상에 영문/한글 자막(CC)이"
-                  " 존재하지 않습니다. 다른 떡상 영상 링크로 시도해 주세요!"
-              )
+            if not supadata_key:
+              st.error("Secrets에 SUPADATA_API_KEY를 설정해 주세요.")
             else:
+              # Supadata YouTube Transcript Endpoint
+              url = f"https://api.supadata.ai/v1/youtube/transcript?videoId={v_id}&text=true"
+              headers = {"x-api-key": supadata_key}
+
+              res = requests.get(url, headers=headers, timeout=15)
+              if res.status_code == 200:
+                data = res.json()
+                # 텍스트 추출
+                full_text = data.get("content", "")
+
+                # 타임스탬프 계산용 전체 길이
+                content_list = data.get("transcript", [])
+                if content_list and isinstance(content_list, list):
+                  total_duration = float(content_list[-1].get("offset", 0)) / 1000.0
+              else:
+                st.error(
+                    f"자막 추출 실패 (상태 코드: {res.status_code}):"
+                    f" {res.text}"
+                )
+
+            # ---------------------------------------------------------
+            # 자막 추출 결과 처리 및 화면 출력
+            # ---------------------------------------------------------
+            if full_text:
               if total_duration == 0:
-                total_duration = 600  # 타임스탬프 계산용 기본값 (10분)
+                total_duration = 600
 
               interval = total_duration / num_captures
               timestamps = []
@@ -328,7 +293,6 @@ with tab2:
                   )
                   st.markdown(f"[▶️ 해당 장면 보기]({ts_link})")
 
-              # ChatGPT / Claude 프롬프트 구성
               timestamps_text = "\n".join(timestamps)
               ai_prompt = f"""아래는 외국인이 한국을 여행하며 남긴 영상 스크립트와 주요 장면 캡처 타임스탬프 정보야.
 한국 시청자가 흥미를 느낄 수 있도록 '외국인의 시선과 본국의 문화 차이'를 비교 분석하는 제3자 나레이션 대본을 작성해줘.
@@ -353,4 +317,4 @@ with tab2:
               )
 
           except Exception as e:
-            st.error(f"자막 처리 중 오류가 발생했습니다: {e}")
+            st.error(f"오류가 발생했습니다: {e}")
