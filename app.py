@@ -8,16 +8,17 @@ from youtube_transcript_api import YouTubeTranscriptApi
 import requests
 
 
-def get_transcript_via_api(video_id):
-  # RapidAPI 등의 서비스 사용 예시
-  url = 'https://youtube-transrav.p.rapidapi.com/transcript'
+def get_transcript_via_rapidapi(video_id):
+  # RapidAPI 유튜브 자막 엔드포인트
+  url = "https://youtube-transcriptor.p.rapidapi.com/transcript"
+  querystring = {"video_id": video_id, "lang": "ko"}
+
   headers = {
-      'X-RapidAPI-Key': st.secrets['RAPIDAPI_KEY'],  # Streamlit Secrets에 저장
-      'X-RapidAPI-Host': 'youtube-transrav.p.rapidapi.com',
+      "X-RapidAPI-Key": st.secrets["RAPIDAPI_KEY"],
+      "X-RapidAPI-Host": "youtube-transcriptor.p.rapidapi.com",
   }
-  response = requests.get(
-      url, headers=headers, params={'videoId': video_id, 'lang': 'ko'}
-  )
+
+  response = requests.get(url, headers=headers, params=querystring)
   return response.json()
 
 # 페이지 기본 설정
