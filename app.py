@@ -3,23 +3,8 @@ import re
 from googleapiclient.discovery import build
 import isodate
 import pandas as pd
-import streamlit as st
-from youtube_transcript_api import YouTubeTranscriptApi
 import requests
-
-
-def get_transcript_via_rapidapi(video_id):
-  # RapidAPI 유튜브 자막 엔드포인트
-  url = "https://youtube-transcriptor.p.rapidapi.com/transcript"
-  querystring = {"video_id": video_id, "lang": "ko"}
-
-  headers = {
-      "X-RapidAPI-Key": st.secrets["RAPIDAPI_KEY"],
-      "X-RapidAPI-Host": "youtube-transcriptor.p.rapidapi.com",
-  }
-
-  response = requests.get(url, headers=headers, params=querystring)
-  return response.json()
+import streamlit as st
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -30,8 +15,8 @@ st.set_page_config(
 
 st.title("🎬 외국인 반응/브이로그 떡상 영상 수집 & 2차 창작 대본 도우미")
 st.caption(
-    "구독자 수 대비 높은 조회수를 기록한 영상 검색부터 스크립트 추출, AI 대본 생성"
-    " 프롬프트까지 지원합니다."
+    "구독자 수 대비 높은 조회수를 기록한 영상 검색부터 RapidAPI 기반 자막"
+    " 추출, AI 대본 프롬프트 생성까지 지원합니다."
 )
 
 # 탭 구성: 1. 영상 수집기 / 2. 스크립트 추출 및 AI 대본 생성
@@ -41,7 +26,6 @@ tab1, tab2 = st.tabs(["🔍 떡상 영상 수집기", "📝 스크립트 추출 
 # [탭 1] 떡상 영상 수집기
 # ---------------------------------------------------------
 with tab1:
-  # 사이드바: 설정 및 API 키 입력
   with st.sidebar:
     st.header("⚙️ 검색 및 API 설정")
     default_api_key = (
@@ -211,14 +195,14 @@ with tab1:
           st.error(f"오류가 발생했습니다: {e}")
 
 # ---------------------------------------------------------
-# [탭 2] 스크립트 추출 및 AI 대본 생성기
+# [탭 2] RapidAPI 기반 자막 추출 및 AI 대본 생성기
 # ---------------------------------------------------------
 with tab2:
-  st.subheader("🎥 영상 분석 & ChatGPT/Claude 프롬프트 생성기")
+  st.subheader("🎥 영상 분석 & ChatGPT/Claude 프롬프트 생성기 (RapidAPI 연동)")
 
   video_url_input = st.text_input(
       "분석할 유튜브 영상 링크 입력",
-      placeholder="https://www.youtube.com/watch?v=XXXXXX",
+      placeholder="https://www.youtube.com/watch?v=DVeiPVdRh3o",
   )
   num_captures = st.slider(
       "주요 장면 타임스탬프 추출 개수", min_value=8, max_value=12, value=10
@@ -232,86 +216,101 @@ with tab2:
 
 
   if st.button("⚡ 스크립트 추출 및 프롬프트 생성", type="primary"):
+    rapidapi_key = st.secrets.get("RAPIDAPI_KEY", "")
+
     if not video_url_input:
       st.warning("유튜브 영상 링크를 입력해 주세요.")
+    elif not rapidapi_key:
+      st.error(
+          "Streamlit Secrets에 RAPIDAPI_KEY가 설정되어 있지 않습니다."
+          " Settings -> Secrets를 확인해주세요."
+      )
     else:
       v_id = extract_video_id(video_url_input)
       if not v_id:
         st.error("유효한 유튜브 영상 URL이 아닙니다.")
       else:
-        with st.spinner("자막 및 주요 장면 타임스탬프를 처리 중입니다..."):
+        with st.spinner("RapidAPI를 통해 자막을 추출 중입니다..."):
           try:
-            # =========================================================
-            # [수정 위치] 1. 프록시(Proxy) 주소 설정 (Streamlit Cloud IP 차단 우회)
-            # =========================================================
-            # 공용 프록시 서버 등록 (필요시 다른 동작하는 무료/유료 프록시 IP로 교체 가능)
-            proxies = {
-                "http": "http://103.152.112.162:80",
-                "https": "http://103.152.112.162:80",
+            # 1. RapidAPI 자막 데이터 요청
+            url = "https://youtube-transcriptor.p.rapidapi.com/transcript"
+            querystring = {"video_id": v_id, "lang": "en"}
+            headers = {
+                "X-RapidAPI-Key": rapidapi_key,
+                "X-RapidAPI-Host": "youtube-transcriptor.p.rapidapi.com",
             }
 
-            # =========================================================
-            # [수정 위치] 2. 자막 요청 시 proxies 파라미터 전달
-            # =========================================================
-            try:
-              # 최신 인스턴스 형태 호출 시 proxies 전달
-              ytt = YouTubeTranscriptApi()
-              fetched = ytt.fetch(
-                  v_id, languages=["ko", "en", "en-US"], proxies=proxies
-              )
-              transcript_list = fetched.data
-            except Exception:
-              # 구버전/대체 함수 호출 시 proxies 전달
-              transcript_list = YouTubeTranscriptApi.get_transcript(
-                  v_id, languages=["ko", "en", "en-US"], proxies=proxies
-              )
-
-            # ---------------------------------------------------------
-            # 이하 기존 자막 텍스트 결합 및 타임스탬프 추출 로직 (동일)
-            # ---------------------------------------------------------
-            full_text = " ".join([
-                item["text"] if isinstance(item, dict) else item.text
-                for item in transcript_list
-            ])
-            total_duration = (
-                transcript_list[-1]["start"]
-                if isinstance(transcript_list[-1], dict)
-                else transcript_list[-1].start
+            response = requests.get(
+                url, headers=headers, params=querystring, timeout=15
             )
+            res_data = response.json()
 
-            # 주요 장면 타임스탬프 산출
-            interval = (
-                total_duration / num_captures if total_duration > 0 else 0
-            )
-            timestamps = []
+            # 응답 데이터 파싱
+            full_text = ""
+            total_duration = 0
 
-            st.markdown("### 📸 주요 장면 캡처 (타임스탬프 기반)")
-            cols = st.columns(4)
+            if isinstance(res_data, list) and len(res_data) > 0:
+              # 배열 형태로 들어온 경우
+              transcript_data = res_data[0].get("transcripts", res_data)
+              full_text = " ".join([
+                  item.get("text", "")
+                  for item in transcript_data
+                  if isinstance(item, dict)
+              ])
+              if transcript_data and isinstance(transcript_data[-1], dict):
+                total_duration = float(transcript_data[-1].get("start", 0))
+            elif isinstance(res_data, dict):
+              # 딕셔너리 형태로 들어온 경우
+              transcripts = res_data.get("transcripts", res_data.get("data", []))
+              if isinstance(transcripts, list):
+                full_text = " ".join([
+                    item.get("text", "")
+                    for item in transcripts
+                    if isinstance(item, dict)
+                ])
+                if transcripts and isinstance(transcripts[-1], dict):
+                  total_duration = float(transcripts[-1].get("start", 0))
 
-            for i in range(num_captures):
-              target_sec = int(i * interval)
-              m, s = divmod(target_sec, 60)
-              h, m = divmod(m, 60)
-              time_str = (
-                  f"{h:02d}:{m:02d}:{s:02d}"
-                  if h > 0
-                  else f"{m:02d}:{s:02d}"
+            if not full_text:
+              st.error(
+                  "자막을 추출하지 못했거나 API 응답 데이터가 비어있습니다."
+                  f" (응답: {res_data})"
               )
+            else:
+              # 2. 주요 장면 타임스탬프 계산 및 UI 표출
+              if total_duration == 0:
+                total_duration = 600  # 기본값 10분 설정
 
-              ts_link = f"https://youtu.be/{v_id}?t={target_sec}"
-              timestamps.append(f"장면 {i+1} [{time_str}]: {ts_link}")
+              interval = total_duration / num_captures
+              timestamps = []
 
-              with cols[i % 4]:
-                st.caption(f"📍 장면 {i+1} ({time_str})")
-                st.image(
-                    f"https://img.youtube.com/vi/{v_id}/hqdefault.jpg",
-                    use_column_width=True,
+              st.markdown("### 📸 주요 장면 캡처 (타임스탬프 기반)")
+              cols = st.columns(4)
+
+              for i in range(num_captures):
+                target_sec = int(i * interval)
+                m, s = divmod(target_sec, 60)
+                h, m = divmod(m, 60)
+                time_str = (
+                    f"{h:02d}:{m:02d}:{s:02d}"
+                    if h > 0
+                    else f"{m:02d}:{s:02d}"
                 )
-                st.markdown(f"[▶️ 해당 장면 보기]({ts_link})")
 
-            # ChatGPT / Claude 프롬프트 자동 구성
-            timestamps_text = "\n".join(timestamps)
-            ai_prompt = f"""아래는 외국인이 한국을 여행하며 남긴 영상 스크립트와 주요 장면 캡처 타임스탬프 정보야.
+                ts_link = f"https://youtu.be/{v_id}?t={target_sec}"
+                timestamps.append(f"장면 {i+1} [{time_str}]: {ts_link}")
+
+                with cols[i % 4]:
+                  st.caption(f"📍 장면 {i+1} ({time_str})")
+                  st.image(
+                      f"https://img.youtube.com/vi/{v_id}/hqdefault.jpg",
+                      use_container_width=True,
+                  )
+                  st.markdown(f"[▶️ 해당 장면 보기]({ts_link})")
+
+              # 3. ChatGPT / Claude 프롬프트 자동 구성
+              timestamps_text = "\n".join(timestamps)
+              ai_prompt = f"""아래는 외국인이 한국을 여행하며 남긴 영상 스크립트와 주요 장면 캡처 타임스탬프 정보야.
 한국 시청자가 흥미를 느낄 수 있도록 '외국인의 시선과 본국의 문화 차이'를 비교 분석하는 제3자 나레이션 대본을 작성해줘.
 시청 지속률이 잘 나오도록 궁금증을 유발하는 구조로 8분 이상의 롱폼 유튜브 대본을 만들어줘.
 
@@ -325,16 +324,13 @@ with tab2:
 {full_text[:3000]} ...(이하 생략)
 """
 
-            st.markdown("---")
-            st.markdown("### 🤖 ChatGPT / Claude 전달용 프롬프트")
-            st.code(ai_prompt, language="markdown")
+              st.markdown("---")
+              st.markdown("### 🤖 ChatGPT / Claude 전달용 프롬프트")
+              st.code(ai_prompt, language="markdown")
 
-            st.text_area(
-                "📄 원본 전체 스크립트 (복사용)", value=full_text, height=150
-            )
+              st.text_area(
+                  "📄 원본 전체 스크립트 (복사용)", value=full_text, height=150
+              )
 
           except Exception as e:
-            st.error(
-                "자막을 불러올 수 없습니다. 프록시 서버 연결 실패 또는 원본"
-                f" 영상에 자막이 없을 수 있습니다: {e}"
-            )
+            st.error(f"RapidAPI 자막 불러오기 실패: {e}")
