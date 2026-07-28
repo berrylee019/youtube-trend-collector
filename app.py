@@ -230,19 +230,13 @@ with tab2:
       if not v_id:
         st.error("유효한 유튜브 영상 URL이 아닙니다.")
       else:
-        with st.spinner("RapidAPI를 통해 자막을 추출 중입니다..."):
+        with st.spinner("자막 데이터를 추출 중입니다..."):
           try:
-            # 1. RapidAPI 자막 데이터 요청
-            url = "https://youtube-transcriptor.p.rapidapi.com/transcript"
-            querystring = {"video_id": v_id, "lang": "en"}
-            headers = {
-                "X-RapidAPI-Key": rapidapi_key,
-                "X-RapidAPI-Host": "youtube-transcriptor.p.rapidapi.com",
-            }
-
-            response = requests.get(
-                url, headers=headers, params=querystring, timeout=15
+            # 구독 필요 없는 우회용 Transcript API 호출
+            transcript_url = (
+                f"https://yt-transcript-api.vercel.app/api/transcript?videoId={v_id}"
             )
+            response = requests.get(transcript_url, timeout=15)
             res_data = response.json()
 
             # 응답 데이터 파싱
@@ -250,26 +244,14 @@ with tab2:
             total_duration = 0
 
             if isinstance(res_data, list) and len(res_data) > 0:
-              # 배열 형태로 들어온 경우
-              transcript_data = res_data[0].get("transcripts", res_data)
               full_text = " ".join([
                   item.get("text", "")
-                  for item in transcript_data
+                  for item in res_data
                   if isinstance(item, dict)
               ])
-              if transcript_data and isinstance(transcript_data[-1], dict):
-                total_duration = float(transcript_data[-1].get("start", 0))
-            elif isinstance(res_data, dict):
-              # 딕셔너리 형태로 들어온 경우
-              transcripts = res_data.get("transcripts", res_data.get("data", []))
-              if isinstance(transcripts, list):
-                full_text = " ".join([
-                    item.get("text", "")
-                    for item in transcripts
-                    if isinstance(item, dict)
-                ])
-                if transcripts and isinstance(transcripts[-1], dict):
-                  total_duration = float(transcripts[-1].get("start", 0))
+              last_item = res_data[-1]
+              if isinstance(last_item, dict):
+                total_duration = float(last_item.get("start", 0))
 
             if not full_text:
               st.error(
