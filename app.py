@@ -226,17 +226,28 @@ with tab2:
       else:
         with st.spinner("자막 및 주요 장면 타임스탬프를 처리 중입니다..."):
           try:
-            # 1. 자막 추출 (한국어 및 영어 대응)
-            transcript_list = YouTubeTranscriptApi.get_transcript(
-                v_id, languages=["ko", "en", "en-US", "auto"]
-            )
+            # 안전한 자막 호출 로직 (버전 호환)
+            try:
+              ytt = YouTubeTranscriptApi()
+              fetched = ytt.fetch(v_id, languages=["ko", "en", "en-US"])
+              transcript_list = fetched.data
+            except Exception:
+              # 대체 경로 시도
+              transcript_list = YouTubeTranscriptApi.get_transcript(
+                  v_id, languages=["ko", "en", "en-US"]
+              )
 
-            full_text = " ".join([item["text"] for item in transcript_list])
+            full_text = " ".join([
+                item["text"] if isinstance(item, dict) else item.text
+                for item in transcript_list
+            ])
             total_duration = (
-                transcript_list[-1]["start"] if transcript_list else 0
+                transcript_list[-1]["start"]
+                if isinstance(transcript_list[-1], dict)
+                else transcript_list[-1].start
             )
 
-            # 2. 주요 장면 8-12개 타임스탬프 계산 및 정보 추출
+            # 2. 주요 장면 타임스탬프 산출
             interval = (
                 total_duration / num_captures if total_duration > 0 else 0
             )
